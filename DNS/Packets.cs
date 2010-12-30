@@ -36,8 +36,6 @@ namespace RemObjects.InternetPack.DNS
     }
 
 
-
-
     public class DNSQuestion
     {
         private DNSClass fClass;
@@ -140,7 +138,7 @@ namespace RemObjects.InternetPack.DNS
 
 
 
-    internal class DNSPacket
+    public class DNSPacket
     {
         private ushort fFlags;
         private ushort fSequenceID;
@@ -523,7 +521,7 @@ namespace RemObjects.InternetPack.DNS
             }
             set
             {
-                this.fFlags = (ushort)((fFlags & ~(1 << 14) | (1 << 13) | (1 << 12) | (1 << 11)) | ((((int)value) & 0xf) << 11));
+                this.fFlags = (ushort)((fFlags & ~((1 << 14) | (1 << 13) | (1 << 12) | (1 << 11))) | ((((int)value) & 0xf) << 11));
             }
         }
 

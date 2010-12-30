@@ -8,7 +8,7 @@ using System.Runtime.InteropServices;
 
 namespace RemObjects.InternetPack.DNS
 {
-    internal class DNSARecord : DNSResource
+    public class  DNSARecord : DNSResource
     {
         private IPAddress fAddress;
 
@@ -86,7 +86,7 @@ namespace RemObjects.InternetPack.DNS
         }
     }
 
-    internal class DNSAAAARecord : DNSResource
+    public class  DNSAAAARecord : DNSResource
     {
         private IPAddress fAddress;
 
@@ -163,7 +163,7 @@ namespace RemObjects.InternetPack.DNS
         }
     }
 
-    internal class DNSCNameRecord : DNSResource
+    public class  DNSCNameRecord : DNSResource
     {
         private string fTargetName;
 
@@ -248,7 +248,7 @@ namespace RemObjects.InternetPack.DNS
     }
 
 
-    internal class DNSNSRecord : DNSResource
+    public class  DNSNSRecord : DNSResource
     {
         private string fNSHost;
 
@@ -335,7 +335,7 @@ namespace RemObjects.InternetPack.DNS
     }
 
 
-    internal class DNSPTRRecord : DNSResource
+    public class  DNSPTRRecord : DNSResource
     {
         private string fTargetName;
 
@@ -421,7 +421,7 @@ namespace RemObjects.InternetPack.DNS
     }
 
 
-    internal class DNSSRVRecord : DNSResource
+    public class  DNSSRVRecord : DNSResource
     {
         private ushort fPort;
         private ushort fPriority;
@@ -556,7 +556,7 @@ namespace RemObjects.InternetPack.DNS
     }
 
 
-    internal class DNSTXTRecord : DNSResource
+    public class  DNSTXTRecord : DNSResource
     {
         private byte[] fData;
 
@@ -631,7 +631,7 @@ namespace RemObjects.InternetPack.DNS
     }
 
 
-    internal class DNSUnknownRecord : DNSResource
+    public class  DNSUnknownRecord : DNSResource
     {
         private byte[] fData;
         private DNSType fType;

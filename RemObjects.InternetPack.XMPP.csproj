@@ -36,6 +36,7 @@
     <Reference Include="System.Core" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="DNS\DNSClient.cs" />
     <Compile Include="DNS\Enums.cs" />
     <Compile Include="DNS\Packets.cs" />
     <Compile Include="DNS\RecordTypes.cs" />
