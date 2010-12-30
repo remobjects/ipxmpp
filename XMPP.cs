@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.ComponentModel;
 using RemObjects.InternetPack.XMPP.Elements;
+using RemObjects.InternetPack.DNS;
 
 namespace RemObjects.InternetPack.XMPP
 {
@@ -55,6 +56,16 @@ namespace RemObjects.InternetPack.XMPP
         public StreamError Error { get { return fError; } }
     }
 
+    public class ErrorArgs : EventArgs
+    {
+        public ErrorArgs(Exception error)
+        {
+            fError = error;
+        }
+        private Exception fError;
+
+        public Exception Error { get { return fError; } }
+    }
     public class AuthenticationFailedArgs : EventArgs
     {
         public AuthenticationFailedArgs(SaslFailure failure)
@@ -66,16 +77,22 @@ namespace RemObjects.InternetPack.XMPP
         public SaslFailure Failure { get { return fFailure; } }
     }
 
-    public enum State { Disconnected, Connecting, Connected, InitializingTLS, Authenticating, Active }
+    public enum State { Disconnected, Resolving, Connecting, Connected, InitializingTLS, Authenticating, Active, Disconnecting }
     public enum InitTLSMode { None, IfAvailable, Always }
     public class XMPPClient: Client
     {
 #region Properties
+        private State fState;
+        [Browsable(false)]
+        public State State { get { return fState; }}
         public string Username { get; set; }
         public string Password { get; set; }
 
         public InitTLSMode InitTLS { get; set; }
         public string Domain { get; set; }
+
+        [DefaultValue(true)]
+        public bool ResolveDomain { get; set; }
         
         [DefaultValue(true)]
         public bool Authenticate { get; set; }
@@ -97,6 +114,7 @@ namespace RemObjects.InternetPack.XMPP
         public event EventHandler<AuthenticationFailedArgs> AuthenticationFailed;
         public event EventHandler Active;
         public event EventHandler<StreamErrorArgs> StreamError;
+        public event EventHandler<ErrorArgs> Error;
         public event EventHandler<IQEventArgs> IQ;
         public event EventHandler<MessageEventArgs> Message;
         public event EventHandler<PresenceEventArgs> Presence;
@@ -134,6 +152,14 @@ namespace RemObjects.InternetPack.XMPP
             if (AuthenticationFailed != null) {
                 AuthenticationFailedArgs args = new AuthenticationFailedArgs(aFailure);
                 AuthenticationFailed(this, args);
+            }
+        }
+        protected void OnError(Exception error)
+        {
+            if (Error != null)
+            {
+                ErrorArgs args = new ErrorArgs(error);
+                Error(this, args);
             }
         }
         protected void OnActive () {
@@ -182,6 +208,7 @@ namespace RemObjects.InternetPack.XMPP
             Port = 5222;
             BindResource = true;
             Authenticate = true;
+            ResolveDomain = true;
         }
 
         private Stream fRootElement;
@@ -258,18 +285,150 @@ namespace RemObjects.InternetPack.XMPP
 
         public void Open()
         {
+            if (fState != XMPP.State.Disconnected) throw new InvalidOperationException();
             if (fConnection != null) return;
 
-            fConnection = ConnectionFactory.CreateClientConnection(this.BindingV4);
-            //.fConnectionfConnection.
+
+            fConnection = SslOptions.Enabled ? SslOptions.CreateClientConnection(this.BindingV4) : ConnectionFactory.CreateClientConnection(this.BindingV4);
+
+            if (ResolveDomain)
+            {
+                fState = XMPP.State.Resolving;
+                DNSClient cl = new DNSClient();
+                cl.BeginRequest(DNSClass.Internet, DNSType.SRV, Domain, false, a =>
+                {
+                    if (a == null || a.Type != DNSType.SRV)
+                    {
+                        OnError(new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.HostNotFound));
+                        fState = XMPP.State.Disconnected;
+
+                        OnDisconnected();
+                        return;
+                    }
+                    this.HostName = ((DNSSRVRecord) a).TargetName;
+                    this.Port = ((DNSSRVRecord)a).Port;
+
+                    
+                    BeginConnect();
+                });
+
+            }
+            else
+            {
+                BeginConnect();
+            }
+        }
+
+        private void BeginConnect()
+        {
+            fState = XMPP.State.Connecting;
+            try
+            {
+                if (this.HostName != null)
+                {
+                    string s = HostName;
+
+                    System.Net.Dns.BeginGetHostEntry(s, a =>
+                    {
+                        try
+                        {
+                            var res = System.Net.Dns.EndGetHostEntry(a);
+                            if (res == null || res.AddressList.Length < 1)
+                            {
+                                OnError(new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.HostNotFound));
+                                fState = XMPP.State.Disconnected;
+                                OnDisconnected();
+                                return;
+                            }
+                            HostAddress = res.AddressList[0];
+                            BeginConnect();
+                        }
+                        catch (Exception e)
+                        {
+                            OnError(e);
+                            fState = XMPP.State.Disconnected;
+                            OnDisconnected();
+                            return;
+                        }
+                    }, null);
+                    return;
+                }
+                OnConnecting();
+
+                fConnection.BeginConnect(HostAddress, Port, a =>
+                {
+                    try
+                    {
+                        fConnection.EndConnect(a);
+                        BeginStream();
+                    }
+                    catch (Exception e)
+                    {
+                        OnError(e);
+                        fState = XMPP.State.Disconnected;
+                        OnDisconnected();
+                        return;
+                    }
+                }, null);
+            }
+            catch (Exception e)
+            {
+                OnError(e);
+                fState = XMPP.State.Disconnected;
+                OnDisconnected();
+                return;
+            }
+        }
+
+        private AsyncXmlParser parser;
+
+        private void BeginStream()
+        {
+            OnConnected();
+            parser = new AsyncXmlParser();
+            parser.Origin = fConnection;
+            fState = XMPP.State.Connected;
+            parser.ReadXmlElementAsync(new Action<XmlParserResult>(GotData), false); 
+                        
+            fRootElement = new ClientStream();
+            fRootElement.To = new JID(Domain);
+
+            BeginSend(fRootElement, WriteMode.Open, null);
+        }
+
+        private void GotData(XmlParserResult data)
+        {
+
+            // TODO: Implement
+            parser.ReadXmlElementAsync(new Action<XmlParserResult>(GotData), true);
+        }
+
+        private void BeginTimeout(Action act)
+        {
+            // TODO: Implement
         }
 
         public void Close()
         {
             if (fConnection == null) return;
+            fState = XMPP.State.Disconnecting;
+            BeginTimeout(() =>
+            {
+                try
+                {
+                    fConnection.Abort();
+                }
+                catch { } // ignore any errors that might occur from the socket
+                fConnection = null;
+                fState = XMPP.State.Disconnected;
+                OnDisconnected();
+            });
             BeginSend(fRootElement, WriteMode.Close, () => {
                 fConnection.Close(true);
-                fConnection = null; });
+                fConnection = null;
+                fState = XMPP.State.Disconnected;
+                OnDisconnected();
+            });
         }
 
     }
