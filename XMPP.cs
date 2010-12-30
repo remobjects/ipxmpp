@@ -184,15 +184,92 @@ namespace RemObjects.InternetPack.XMPP
             Authenticate = true;
         }
 
+        private Stream fRootElement;
+        private StringBuilder sb = new StringBuilder();
+
         private Connection fConnection;
         public Connection Connection { get { return fConnection; } }
 
+
+        private LinkedList<QueuedItem> fItems = new LinkedList<QueuedItem>();
+        private volatile bool fInSending;
+        private class QueuedItem
+        {
+            public Element Element {get; set;}
+            public WriteMode Mode { get; set; }
+            public Action Done { get; set; }
+        }
+
+        private void BeginSend(Element element, WriteMode wm, Action done) 
+        {
+            lock (fItems) {
+                if (fInSending)
+                    fItems.AddLast(new QueuedItem
+                    {
+                        Element = element,
+                        Mode = wm,
+                        Done = done
+                    });
+                DoSendItem(element, wm, done);
+            }
+        }
+
+        private void DoSendItem(Element element, WriteMode mode, Action done)
+        {
+            fInSending = true;
+            sb.Length = 0;
+            element.ToString(sb, new WriteOptions { Mode = mode, StreamPrefix = "stream" });
+            byte[] data = Encoding.UTF8.GetBytes(sb.ToString());
+            try
+            {
+                fConnection.BeginWrite(data, 0, data.Length, new AsyncCallback(ItemSent), done);
+            }
+            catch
+            {
+            }
+        }
+
+        private void ItemSent(IAsyncResult ar)
+        {
+            try
+            {
+                fConnection.EndWrite(ar);
+                if (ar.AsyncState != null) {
+                    ((Action)ar.AsyncState)();
+                }
+                lock (fItems)
+                {
+                    if (fItems.Count > 0)
+                    {
+                        var el = fItems.First.Value;
+                        fItems.RemoveFirst();
+                        DoSendItem(el.Element, el.Mode, el.Done);
+                    }
+                    else
+                    {
+                        fInSending = false;
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
         public void Open()
         {
+            if (fConnection != null) return;
+
+            fConnection = ConnectionFactory.CreateClientConnection(this.BindingV4);
+            //.fConnectionfConnection.
         }
 
         public void Close()
         {
+            if (fConnection == null) return;
+            BeginSend(fRootElement, WriteMode.Close, () => {
+                fConnection.Close(true);
+                fConnection = null; });
         }
 
     }

@@ -36,6 +36,9 @@
     <Reference Include="System.Core" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="DNS\Enums.cs" />
+    <Compile Include="DNS\Packets.cs" />
+    <Compile Include="DNS\RecordTypes.cs" />
     <Compile Include="Elements\Auth.cs" />
     <Compile Include="Elements\ElementTypes.cs" />
     <Compile Include="Elements\IQ.cs" />
