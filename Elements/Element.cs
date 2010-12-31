@@ -304,6 +304,11 @@ namespace RemObjects.InternetPack.XMPP.Elements
             ToString(sb, wo);
             return sb.ToString();
         }
+
+        internal bool Matches(string prefix, string name)
+        {
+            return this.Prefix == prefix && this.Name == name;
+        }
     }
 
     public abstract class ToFromElement : Element
@@ -318,5 +323,5 @@ namespace RemObjects.InternetPack.XMPP.Elements
         public string ID { get { return GetAttributeByName(null, "id"); } set { AddOrReplaceAttribute(null, "id", value); } }
         public string Lang { get { return GetAttributeByName(Namespaces.XmlNamespace, "lang"); } set { AddOrReplaceAttribute(Namespaces.XmlNamespace, "lang", value); } }
     }
-
+    
 }

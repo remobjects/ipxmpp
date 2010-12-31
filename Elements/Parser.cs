@@ -69,10 +69,10 @@ namespace RemObjects.InternetPack.XMPP.Elements
         private string name;
         private Attribute[] attribute;
 
-        private XmlNodeType NodeType { get { return nodeType; } }
-        private string Prefix { get { return prefix; } }
-        private string Name { get { return name; } }
-        private Attribute[] Attribute { get { return attribute; } }
+        public XmlNodeType NodeType { get { return nodeType; } }
+        public string Prefix { get { return prefix; } }
+        public string Name { get { return name; } }
+        public Attribute[] Attribute { get { return attribute; } }
 
 
 

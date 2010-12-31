@@ -388,6 +388,7 @@ namespace RemObjects.InternetPack.XMPP
             parser = new AsyncXmlParser();
             parser.Origin = fConnection;
             fState = XMPP.State.Connected;
+            fServerRoot = null;
             parser.ReadXmlElementAsync(new Action<XmlParserResult>(GotData), false); 
                         
             fRootElement = new ClientStream();
@@ -396,11 +397,91 @@ namespace RemObjects.InternetPack.XMPP
             BeginSend(fRootElement, WriteMode.Open, null);
         }
 
+        private Element fServerRoot;
+        private List<Element> fServerElementStack = new List<Element>();
+
         private void GotData(XmlParserResult data)
         {
+            switch (data.Type)
+            {
+                case XmlParserResultType.Error:
+                    OnStreamError(new StreamError { Error = ((XmlErrorResult)data).Error });
+                    Close();
+                    return;
+                case XmlParserResultType.Node:
+                    XmlNodeResult nd = (XmlNodeResult)data;
+                    switch (nd.NodeType)
+                    {
+                        case XmlNodeType.XmlInfo: break; // who cares about that?
+                        case XmlNodeType.Single:
+                            if (fServerElementStack.Count == 0)
+                            {
+                                OnStreamError(new StreamError { Error = StreamErrorKind.InvalidXml });
+                                Close();
+                                return;
+                            }
+                            Element el = CreateNode(nd, fServerElementStack[fServerElementStack.Count - 1]);
+                            if (this.fServerElementStack.Count <= 1)
+                                GotFirstLevelElement(el);
+                        break;
+                        case XmlNodeType.Open:
+                            el = CreateNode(nd, fServerElementStack.Count == 0 ? null : fServerElementStack[fServerElementStack.Count - 1]);
+                            this.fServerElementStack.Add(el);
+                            if (this.fServerElementStack.Count == 1)
+                                GotRootLevelElement(el);
+                            else if (fServerElementStack.Count == 2)
+                                GotFirstLevelElement(el);
+                                
+                            break;
+                        case XmlNodeType.Close:
+                        if (fServerElementStack.Count == 0 || !fServerElementStack[fServerElementStack.Count-1].Matches(nd.Prefix, nd.Name))
+                        {
+                            OnStreamError(new StreamError { Error = StreamErrorKind.InvalidXml });
+                            Close();
+                            return;
+                        }
+                        el = fServerElementStack[fServerElementStack.Count - 1];
+                            fServerElementStack.RemoveAt(fServerElementStack.Count -1);
+                            if (fServerElementStack.Count == 0)
+                            {
+                                Close();
+                                break;
+                            }
+                            if (fServerElementStack.Count == 1)
+                            {
+                                GotRootLevelElement(el);
+                            }
+                            break;
+                    }
+                    break;
+                case XmlParserResultType.Text:
+                    if (fServerElementStack.Count == 0)
+                    {
+                        // discard
+                    }
+                    else
+                    {
+                        fServerElementStack[fServerElementStack.Count - 1].Text += data;
+                    }
+                    break;
+            }
+            
+            parser.ReadXmlElementAsync(new Action<XmlParserResult>(GotData), fServerElementStack.Count > 0);
+        }
 
-            // TODO: Implement
-            parser.ReadXmlElementAsync(new Action<XmlParserResult>(GotData), true);
+        private void GotFirstLevelElement(Element el)
+        {
+            throw new NotImplementedException();
+        }
+
+        private Element CreateNode(XmlNodeResult nd, Element element)
+        {
+            throw new NotImplementedException();
+        }
+
+        private void GotRootLevelElement(Element el)
+        {
+            throw new NotImplementedException();
         }
 
         private void BeginTimeout(Action act)
