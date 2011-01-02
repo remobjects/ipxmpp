@@ -31,7 +31,7 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="RemObjects.InternetPack, Version=2.0.0.851, Culture=neutral, PublicKeyToken=3df3cad1b7aa5098, processorArchitecture=MSIL" />
+    <Reference Include="RemObjects.InternetPack, Version=2.0.50.864, Culture=neutral, PublicKeyToken=3df3cad1b7aa5098, processorArchitecture=MSIL" />
     <Reference Include="System" />
     <Reference Include="System.Core" />
   </ItemGroup>
@@ -43,6 +43,7 @@
     <Compile Include="Elements\Auth.cs" />
     <Compile Include="Elements\ElementTypes.cs" />
     <Compile Include="Elements\IQ.cs" />
+    <Compile Include="Elements\IQTypes\Bind.cs" />
     <Compile Include="Elements\Message.cs" />
     <Compile Include="Elements\Parser.cs" />
     <Compile Include="Elements\Presence.cs" />

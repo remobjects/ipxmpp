@@ -102,6 +102,7 @@ namespace RemObjects.InternetPack.XMPP.Elements
             if (allowText)
                 state = AsyncState.AllowText;
             gotResultCallback = result;
+            Origin.BufferedAsync = false; 
             Read();
         }
    
@@ -213,7 +214,12 @@ namespace RemObjects.InternetPack.XMPP.Elements
                             goto case AsyncState.GotStartByte;
                         return;
                     case AsyncState.GotStartByte:
-                        ReadByte();
+                        if (ReadByte() != '<')
+                        {
+                            state = AsyncState.None;
+                            gotResultCallback(XmlParserResult.Create(StreamErrorKind.InvalidXml));
+                            return;
+                        }
                         state = AsyncState.GotSecondByte;
                         if (BeginReadUntil(a => true, false))
                             goto case AsyncState.GotSecondByte;
@@ -230,11 +236,16 @@ namespace RemObjects.InternetPack.XMPP.Elements
                                 currentNodeType = XmlNodeType.Close;
                                 break;
                             default:
+                                currentNodeType = XmlNodeType.Open;
                                 if (ValidXmlNameChar((char)n, true))
                                     currentData.WriteByte((byte)n);
-                                state = AsyncState.None;
-                                gotResultCallback(XmlParserResult.Create(StreamErrorKind.InvalidXml));
-                                return;
+                                else
+                                {
+                                    state = AsyncState.None;
+                                    gotResultCallback(XmlParserResult.Create(StreamErrorKind.InvalidXml));
+                                    return;
+                                }
+                                break;
                         }
                         state = AsyncState.GotName;
                         if (BeginReadUntil(a => !ValidXmlNameChar((char)a, currentData.Length == 0), false))
@@ -293,8 +304,10 @@ namespace RemObjects.InternetPack.XMPP.Elements
                         // attribute:
                         if (ValidXmlNameChar((char)n, true))
                         {
+                            currentData.SetLength(0);
+                            currentData.WriteByte((byte)n);
                             state = AsyncState.ReadAttributeName;
-                            if (BeginReadUntil(a => ValidXmlNameChar((char)a, false), true))
+                            if (BeginReadUntil(a => !ValidXmlNameChar((char)a, false), false))
                                 goto case AsyncState.ReadAttributeName;
                         }
                         else
@@ -341,7 +354,7 @@ namespace RemObjects.InternetPack.XMPP.Elements
                         else if (n == '\'')
                         {
                             state = AsyncState.ReadStringSingleQuote;
-                            if (BeginReadUntil(a => a == '"', true))
+                            if (BeginReadUntil(a => a == '\'', true))
                                 goto case AsyncState.ReadStringSingleQuote;
                         }
                         else

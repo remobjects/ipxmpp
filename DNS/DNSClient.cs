@@ -160,8 +160,11 @@ namespace RemObjects.InternetPack.DNS
             DNSQuestion q= new DNSQuestion();
             q.Class = cl;
             q.ClearCache = clearcache;
+            if (!name.EndsWith("."))
+                name += "."; // domain names technically end with a .
             q.Name = name;
             q.Type = type;
+
             BeginRequest(q, action);
         }
     }

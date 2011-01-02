@@ -5,9 +5,26 @@ using System.Text;
 using System.ComponentModel;
 using RemObjects.InternetPack.XMPP.Elements;
 using RemObjects.InternetPack.DNS;
+using System.Threading;
 
 namespace RemObjects.InternetPack.XMPP
 {
+
+    public class XMPPException : Exception { public XMPPException(string s) : base(s) { } }
+    public class TlsRequiredException : XMPPException { public TlsRequiredException(string s) : base(s) { } }
+
+    public class SaslFailureException : XMPPException
+    {
+        public SaslFailureException(string s) : base(s) { }
+        public SaslFailureException(SaslFailure aFailure)
+            : base(aFailure.StringError)
+        {
+            fFailure = aFailure;
+        }
+
+        private SaslFailure fFailure;
+        public SaslFailure Failure { get { return fFailure; } }
+    }
     public class MessageEventArgs : EventArgs
     {
         public MessageEventArgs(Message aMessage)
@@ -55,6 +72,16 @@ namespace RemObjects.InternetPack.XMPP
 
         public StreamError Error { get { return fError; } }
     }
+    public class StreamFeaturesArgs : EventArgs
+    {
+        public StreamFeaturesArgs(StreamFeatures features)
+        {
+            fFeatures = features;
+        }
+        private StreamFeatures fFeatures;
+
+        public StreamFeatures Features { get { return fFeatures; } }
+    }
 
     public class ErrorArgs : EventArgs
     {
@@ -77,11 +104,14 @@ namespace RemObjects.InternetPack.XMPP
         public SaslFailure Failure { get { return fFailure; } }
     }
 
-    public enum State { Disconnected, Resolving, Connecting, Connected, InitializingTLS, Authenticating, Active, Disconnecting }
+    public enum State { Disconnected, Resolving, Connecting, Connected, InitializingTLS, Authenticating, Authenticated, BindingResource, CreatingSession, Active, Disconnecting }
     public enum InitTLSMode { None, IfAvailable, Always }
     public class XMPPClient: Client
     {
-#region Properties
+        #region Properties
+        private TimeSpan fTimeout;
+        public TimeSpan Timeout { get { return fTimeout; } set { fTimeout = value; } }
+        
         private State fState;
         [Browsable(false)]
         public State State { get { return fState; }}
@@ -101,7 +131,15 @@ namespace RemObjects.InternetPack.XMPP
         public string Resource { get; set; }
         [DefaultValue(true)]
         public bool BindResource { get; set; }
+        
+        [DefaultValue(true)]
+        public bool CreateSession { get; set; }
         #endregion
+
+        [DefaultValue(true)]
+        public bool SendPresenceAndPriority { get; set; }
+        [DefaultValue(1)]
+        public int Priority { get; set; }
 
         #region Events
         public event EventHandler Disconnected;
@@ -113,7 +151,9 @@ namespace RemObjects.InternetPack.XMPP
         public event EventHandler Authenticated;
         public event EventHandler<AuthenticationFailedArgs> AuthenticationFailed;
         public event EventHandler Active;
+        public event EventHandler CreatingSession; 
         public event EventHandler<StreamErrorArgs> StreamError;
+        public event EventHandler<StreamFeaturesArgs> StreamFeatures;
         public event EventHandler<ErrorArgs> Error;
         public event EventHandler<IQEventArgs> IQ;
         public event EventHandler<MessageEventArgs> Message;
@@ -167,10 +207,25 @@ namespace RemObjects.InternetPack.XMPP
                 Active(this, EventArgs.Empty);
             }
         }
+        protected void OnCreateSession()
+        {
+            if (CreatingSession != null)
+            {
+                CreatingSession(this, EventArgs.Empty);
+            }
+        }
         protected void OnStreamError(StreamError anError){
             if (StreamError != null) {
                 StreamErrorArgs args = new StreamErrorArgs(anError);
                 StreamError(this, args);
+            }
+        }
+        protected void OnStreamFeatures(StreamFeatures aFeatures)
+        {
+            if (StreamFeatures != null)
+            {
+                StreamFeaturesArgs args = new StreamFeaturesArgs(aFeatures);
+                StreamFeatures(this, args);
             }
         }
         protected bool OnIQ(IQ anIQ)
@@ -202,14 +257,40 @@ namespace RemObjects.InternetPack.XMPP
         
         #endregion
 
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                if (fTimer != null)
+                    fTimer.Dispose();
+                if (fConnection != null)
+                    fConnection.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+        public XMPPClient()
+        {
+            LoadDefaults();
+        }
         private void LoadDefaults()
         {
             InitTLS = InitTLSMode.IfAvailable;
             Port = 5222;
+            Priority = 1;
+            SendPresenceAndPriority = true;
             BindResource = true;
             Authenticate = true;
             ResolveDomain = true;
+            CreateSession = true;
+            fTimeout = new TimeSpan(0, 0, 15);
         }
+
+        private int fCounter;
+        private class IQReply {
+            public Action<IQ> Callback;
+            public DateTime Timeout;
+        }
+        private Dictionary<int, IQReply> fIQReplies = new Dictionary<int, IQReply>();
 
         private Stream fRootElement;
         private StringBuilder sb = new StringBuilder();
@@ -227,17 +308,27 @@ namespace RemObjects.InternetPack.XMPP
             public Action Done { get; set; }
         }
 
+
+        private Element fServerRoot;
+        private List<Element> fServerElementStack = new List<Element>();
+        private AsyncXmlParser parser;
+        private Mechanisms fServerMechanisms;
+        private System.Threading.Timer fTimer;
+        private volatile Action fTimeoutCallback;
+
+        
         private void BeginSend(Element element, WriteMode wm, Action done) 
         {
             lock (fItems) {
-                if (fInSending)
+                
                     fItems.AddLast(new QueuedItem
                     {
                         Element = element,
                         Mode = wm,
                         Done = done
                     });
-                DoSendItem(element, wm, done);
+                if (!fInSending)
+                    DoSendItem(element, wm, done);
             }
         }
 
@@ -249,7 +340,9 @@ namespace RemObjects.InternetPack.XMPP
             byte[] data = Encoding.UTF8.GetBytes(sb.ToString());
             try
             {
-                fConnection.BeginWrite(data, 0, data.Length, new AsyncCallback(ItemSent), done);
+                Connection cn = fConnection;
+                if (cn != null)
+                    cn.BeginWrite(data, 0, data.Length, new AsyncCallback(ItemSent), done);
             }
             catch
             {
@@ -266,10 +359,10 @@ namespace RemObjects.InternetPack.XMPP
                 }
                 lock (fItems)
                 {
+                    fItems.RemoveFirst();
                     if (fItems.Count > 0)
                     {
                         var el = fItems.First.Value;
-                        fItems.RemoveFirst();
                         DoSendItem(el.Element, el.Mode, el.Done);
                     }
                     else
@@ -289,13 +382,13 @@ namespace RemObjects.InternetPack.XMPP
             if (fConnection != null) return;
 
 
-            fConnection = SslOptions.Enabled ? SslOptions.CreateClientConnection(this.BindingV4) : ConnectionFactory.CreateClientConnection(this.BindingV4);
-
+            fConnection = NewConnection(this.BindingV4);
+            fConnection.AsyncDisconnect += new EventHandler(ServerDisconnected);
             if (ResolveDomain)
             {
                 fState = XMPP.State.Resolving;
                 DNSClient cl = new DNSClient();
-                cl.BeginRequest(DNSClass.Internet, DNSType.SRV, Domain, false, a =>
+                cl.BeginRequest(DNSClass.Internet, DNSType.SRV, "_xmpp-client._tcp."+ Domain, false, a =>
                 {
                     if (a == null || a.Type != DNSType.SRV)
                     {
@@ -319,14 +412,25 @@ namespace RemObjects.InternetPack.XMPP
             }
         }
 
+        private void ServerDisconnected(object sender, EventArgs e)
+        {
+            OnDisconnected();
+            fState = XMPP.State.Disconnected;
+            EndTimeout();
+            Connection cn = fConnection;
+            fConnection = null;
+            if (cn != null) cn.Dispose();
+        }
+
         private void BeginConnect()
         {
             fState = XMPP.State.Connecting;
             try
             {
-                if (this.HostName != null)
+                if (this.HostAddress == null)
                 {
                     string s = HostName;
+                    
 
                     System.Net.Dns.BeginGetHostEntry(s, a =>
                     {
@@ -380,7 +484,6 @@ namespace RemObjects.InternetPack.XMPP
             }
         }
 
-        private AsyncXmlParser parser;
 
         private void BeginStream()
         {
@@ -389,24 +492,31 @@ namespace RemObjects.InternetPack.XMPP
             parser.Origin = fConnection;
             fState = XMPP.State.Connected;
             fServerRoot = null;
-            parser.ReadXmlElementAsync(new Action<XmlParserResult>(GotData), false); 
-                        
+            parser.ReadXmlElementAsync(new Action<XmlParserResult>(GotData), false);
+
             fRootElement = new ClientStream();
             fRootElement.To = new JID(Domain);
 
             BeginSend(fRootElement, WriteMode.Open, null);
+            BeginTimeout();
         }
 
-        private Element fServerRoot;
-        private List<Element> fServerElementStack = new List<Element>();
+        private void BeginTimeout()
+        {
+            BeginTimeout(() =>
+            {
+                OnError(new TimeoutException());
+                Close();
+            });
+        }
 
         private void GotData(XmlParserResult data)
         {
+            bool lStopReading = false;
             switch (data.Type)
             {
                 case XmlParserResultType.Error:
-                    OnStreamError(new StreamError { Error = ((XmlErrorResult)data).Error });
-                    Close();
+                    SendStreamError(new StreamError { Error = ((XmlErrorResult)data).Error });
                     return;
                 case XmlParserResultType.Node:
                     XmlNodeResult nd = (XmlNodeResult)data;
@@ -416,32 +526,28 @@ namespace RemObjects.InternetPack.XMPP
                         case XmlNodeType.Single:
                             if (fServerElementStack.Count == 0)
                             {
-                                OnStreamError(new StreamError { Error = StreamErrorKind.InvalidXml });
-                                Close();
+                                SendStreamError(new StreamError { Error = StreamErrorKind.InvalidXml });
                                 return;
                             }
                             Element el = CreateNode(nd, fServerElementStack[fServerElementStack.Count - 1]);
                             if (this.fServerElementStack.Count <= 1)
-                                GotFirstLevelElement(el);
-                        break;
+                                lStopReading = GotFirstLevelElement(el);
+                            break;
                         case XmlNodeType.Open:
                             el = CreateNode(nd, fServerElementStack.Count == 0 ? null : fServerElementStack[fServerElementStack.Count - 1]);
                             this.fServerElementStack.Add(el);
                             if (this.fServerElementStack.Count == 1)
                                 GotRootLevelElement(el);
-                            else if (fServerElementStack.Count == 2)
-                                GotFirstLevelElement(el);
-                                
+
                             break;
                         case XmlNodeType.Close:
-                        if (fServerElementStack.Count == 0 || !fServerElementStack[fServerElementStack.Count-1].Matches(nd.Prefix, nd.Name))
-                        {
-                            OnStreamError(new StreamError { Error = StreamErrorKind.InvalidXml });
-                            Close();
-                            return;
-                        }
-                        el = fServerElementStack[fServerElementStack.Count - 1];
-                            fServerElementStack.RemoveAt(fServerElementStack.Count -1);
+                            if (fServerElementStack.Count == 0 || !fServerElementStack[fServerElementStack.Count - 1].Matches(nd.Prefix, nd.Name))
+                            {
+                                SendStreamError(new StreamError { Error = StreamErrorKind.InvalidXml });
+                                return;
+                            }
+                            el = fServerElementStack[fServerElementStack.Count - 1];
+                            fServerElementStack.RemoveAt(fServerElementStack.Count - 1);
                             if (fServerElementStack.Count == 0)
                             {
                                 Close();
@@ -449,7 +555,7 @@ namespace RemObjects.InternetPack.XMPP
                             }
                             if (fServerElementStack.Count == 1)
                             {
-                                GotRootLevelElement(el);
+                                lStopReading = GotFirstLevelElement(el);
                             }
                             break;
                     }
@@ -461,32 +567,572 @@ namespace RemObjects.InternetPack.XMPP
                     }
                     else
                     {
-                        fServerElementStack[fServerElementStack.Count - 1].Text += data;
+                        fServerElementStack[fServerElementStack.Count - 1].Text += ((XmlTextResult)data).Text;
                     }
                     break;
             }
-            
+            if (!lStopReading)
+                parser.ReadXmlElementAsync(new Action<XmlParserResult>(GotData), fServerElementStack.Count > 0);
+        }
+
+        private void SendStreamError(Elements.StreamError streamError)
+        {
+            BeginSend(streamError, WriteMode.None, new Action(Close));
+        }
+
+        private bool GotFirstLevelElement(Element el)
+        {
+            switch (el.Type)
+            {
+                case ElementType.Presence:
+                    GotPresence((RemObjects.InternetPack.XMPP.Elements.Presence)el);
+                    break;
+                case ElementType.Message:
+                    GotMessage((Elements.Message)el);
+                    break;
+                case ElementType.IQ:
+                    GotIQ((Elements.IQ)el);
+                    break;
+                case ElementType.StreamError:
+                    OnStreamError((Elements.StreamError)el);
+                    Close();
+                    break;
+                case ElementType.SASLAbort:
+                case ElementType.SASLAuth:
+                case ElementType.SASLChallenge:
+                case ElementType.SASLFailure:
+                case ElementType.SASLResponse:
+                case ElementType.SASLSuccess:
+                    if (fState == State.Authenticating)
+                        AuthReply(el);
+                    break;
+                case ElementType.StartTLSFailure:
+                case ElementType.StartTLSProceed:
+                    if (fState == State.InitializingTLS)
+                        return TLSReply(el);
+                    break;
+                case ElementType.StreamFeatures:
+                    if (fState == State.Connected || fState == XMPP.State.Authenticated)
+                        GotFeatures((Elements.StreamFeatures)el);
+                    break;
+                    
+            }
+            return false;
+        }
+
+        private void GotFeatures(StreamFeatures features)
+        {
+            EndTimeout();
+            OnStreamFeatures(features);
+            if (fState == XMPP.State.Authenticated)
+            {
+                if (BindResource)
+                {
+                    fState = XMPP.State.BindingResource;
+
+                    SendResourceBinding();
+                }
+                else
+                {
+                    fState = XMPP.State.Active; // finally!
+                        
+                    OnActive();
+                }
+                return;
+            }
+            fServerMechanisms = features.AuthenticationMechanisms;
+            var starttls = features.StartTLS;
+            if (!(fConnection is SslConnection))
+            {
+                switch (InitTLS)
+                {
+                    case InitTLSMode.Always:
+                        if (starttls == null)
+                        {
+                            OnError(new TlsRequiredException("TLS required but not supported by server"));
+                            Close();
+                            return;
+                        }
+                        StartTLS();
+                        break;
+                    case InitTLSMode.IfAvailable:
+                        StartTLS();
+                        break;
+                    default:
+                        StartAuth();
+                        break;
+                }
+            }
+            else
+                StartAuth();
+        }
+
+        private void StartTLS() 
+        {
+            fState = State.InitializingTLS;
+            OnInitializingTLS();
+            BeginTimeout();
+            BeginSend(new StartTLS(), WriteMode.None, null);
+        }
+        
+        private bool TLSReply(Element el) 
+        {
+            EndTimeout();
+            if (el.Type == ElementType.StartTLSProceed)
+            {
+                SslOptions.TargetHostName = Domain;
+                var newconn = SslOptions.CreateClientConnection(fConnection);
+                BeginTimeout();
+                if (((SslConnection)newconn).BeginInitializeClientConnection((a) =>
+                {
+                    try
+                    {
+
+                        ((SslConnection)newconn).EndInitializeClientConnection(a);
+                        RestartConnection(newconn);
+                    }
+                    catch (Exception e)
+                    {
+                        OnError(e);
+                        Close();
+                    }
+                }, null) == null)
+                {
+                    RestartConnection(newconn);
+                }
+                return true;
+            }
+            else
+            {
+                OnError(new TlsRequiredException("Server did not accept starttls request"));
+                Close();
+                return false;
+            }
+        }
+
+        private void RestartConnection(InternetPack.Connection newconn)
+        {
+            OnInitializedTLS();
+            fConnection = newconn;
+            fState = XMPP.State.Connected;
+            fServerElementStack.Clear();
+            fServerMechanisms = null;
+            fServerRoot = null;
+
+            parser.Origin = fConnection;
             parser.ReadXmlElementAsync(new Action<XmlParserResult>(GotData), fServerElementStack.Count > 0);
+            BeginSend(fRootElement, WriteMode.Open, null);
+            BeginTimeout();
         }
 
-        private void GotFirstLevelElement(Element el)
+        private void StartAuth() 
         {
-            throw new NotImplementedException();
+            fState = XMPP.State.Authenticating;
+            OnAuthenticating();
+            if (fServerMechanisms == null || !fServerMechanisms.Items.Any(a=>String.Equals(a, "PLAIN", StringComparison.InvariantCultureIgnoreCase))) 
+            {
+                OnError(new XMPPException("PLAIN authentication not supported"));
+                Close();
+                return;
+            }
+            SaslAuth auth = new SaslAuth();
+            auth.AddOrReplaceAttribute(null, "mechanism", "PLAIN");
+            auth.AddOrReplaceAttribute(Namespaces.GTalkAuth, "client-uses-full-bind-result", "true");
+            auth.Text = Convert.ToBase64String(Encoding.UTF8.GetBytes("\0"+Username+"\0"+Password));
+            BeginTimeout();
+            BeginSend(auth, WriteMode.None, null);
         }
 
-        private Element CreateNode(XmlNodeResult nd, Element element)
+        private void AuthReply(Element el)
         {
-            throw new NotImplementedException();
+            EndTimeout();
+            switch (el.Type)
+            {
+                case ElementType.SASLSuccess:
+
+                    fState = XMPP.State.Authenticated;
+                    fServerElementStack.Clear();
+                    fServerRoot = null;
+                    OnAuthenticated();
+                    BeginTimeout();
+                    BeginSend(fRootElement, WriteMode.Open, null);
+
+                    break;
+                case ElementType.SASLFailure:
+                    OnError(new SaslFailureException((SaslFailure)el));
+                    Close();
+                    break;
+                default:
+                    OnError(new SaslFailureException("Invalid SASL reply: " + el.ToString()));
+                    Close();
+                    break;
+            }
+        }
+
+
+
+        private void SendResourceBinding()
+        {
+            fState = XMPP.State.BindingResource;
+            var iq = new IQ();
+            iq.IQType = IQType.set;
+            iq.Elements.Add(new RemObjects.InternetPack.XMPP.Elements.IQTypes.Bind {
+                Resource = this.Resource });
+
+            SendIQ(iq, a =>
+            {
+                if (a == null)
+                {
+                    OnError(new TimeoutException());
+                    Close();
+                    return;
+                }
+                if (a.IQType != IQType.result)
+                {
+                    OnError(new XMPPException("Error binding resource: "+a));
+                    Close();
+                    return;
+                }
+                if (CreateSession)
+                {
+                    SendCreateSession();
+                }
+                else
+                {
+                    fState = XMPP.State.Active;
+                    OnActive();
+                }
+            });
+            
+        }
+
+        private void SendCreateSession()
+        {
+            fState = XMPP.State.CreatingSession;
+            OnCreateSession();
+            var iq = new IQ();
+            iq.To = new JID(Domain);
+            iq.IQType = IQType.set;
+            iq.Elements.Add(new UnknownElement {
+                NamespaceURI = Namespaces.SessionNamespace,
+                Name = "sesion"});
+            SendIQ(iq, a => {
+                if (a == null)
+                {
+                    OnError(new TimeoutException());
+                    Close();
+                    return;
+                }
+                if (a.IQType != IQType.result)
+                {
+                    OnError(new XMPPException("Error creating session: " + a));
+                    Close();
+                    return;
+                }
+                fState = XMPP.State.Active;
+                OnActive();
+
+                if (SendPresenceAndPriority)
+                {
+                    var pres = new Presence();
+                    pres.Priority = Priority;
+                    SendPresence(pres);
+                }
+            });
+        }
+
+        public void SendPresence(Presence presence)
+        {
+            BeginSend(presence, WriteMode.None, null);
+        }
+
+        public void SendMessage(Message msg)
+        {
+            BeginSend(msg, WriteMode.None, null);
+        }
+
+        public void SendIQ(IQ packet, Action<IQ> reply)
+        {
+            lock (fIQReplies)
+            {
+                packet.ID = "n" + fCounter.ToString();
+                fIQReplies.Add(fCounter, new IQReply
+                {
+                    Callback = reply,
+                    Timeout = DateTime.UtcNow.Add(fTimeout)
+                });
+                fCounter++;
+                if (fIQReplies.Count == 1)
+                    BeginTimeout(new Action(IQTimeoutCheck), true);
+            }
+            
+            BeginSend(packet, WriteMode.None, null);
+        }
+
+        private void IQTimeoutCheck() 
+        {
+            LinkedList<KeyValuePair<int, IQReply>> lToRemove=  null;
+            lock (fIQReplies)
+            {
+                DateTime n = DateTime.UtcNow;
+                foreach (var el in fIQReplies)
+                {
+                    if (n > el.Value.Timeout)
+                    {
+                        if (lToRemove == null) lToRemove = new LinkedList<KeyValuePair<int,IQReply>>();
+                        lToRemove.AddLast(el);
+                    }
+                }
+                if (lToRemove != null)
+                    foreach (var el in lToRemove)
+                    {
+                        fIQReplies.Remove(el.Key);
+                    }
+            }
+            if (lToRemove != null)
+            foreach (var el in lToRemove){
+                if (el.Value.Callback != null)
+                    el.Value.Callback(null);
+            }
+        }
+
+        private void GotIQ(Elements.IQ iq)
+        {
+            switch (iq.IQType)
+            {
+                case IQType.error:
+                case IQType.result:
+                    int no;
+                    if (iq.ID.StartsWith("n") && int.TryParse(iq.ID.Substring(1), out no))
+                    {
+                        IQReply repl = null;
+                            
+                        lock (fIQReplies)
+                        {
+                            if (fIQReplies.TryGetValue(no, out repl))
+                            {
+                                fIQReplies.Remove(no);
+                                
+                            }
+                        }
+                        if (repl.Callback != null)
+                            repl.Callback(iq);
+                    }
+                    break; // else it's not one of ours
+                default:
+                    // TODO: any known iq items here
+                    if (OnIQ(iq)) return;
+
+                    Elements.IQ replyiq = new IQ();
+                    replyiq.ID = iq.ID;
+                    replyiq.IQType = IQType.error;
+
+                    break;
+            }
+        }
+
+        private void GotMessage(Elements.Message message)
+        {
+            OnMessage(message);
+        }
+
+        private void GotPresence(Elements.Presence presence)
+        {
+            OnPresence(presence);
+        }
+
+
+        private Element CreateNode(XmlNodeResult nd, Element parent)
+        {
+            string ens;
+            if (nd.Prefix != null)
+            {
+                RemObjects.InternetPack.XMPP.Elements.Attribute at = nd.Attribute.FirstOrDefault(a => a.Prefix == "xmlns" && a.Name == nd.Prefix);
+                if (at == null)
+                {
+                    Element el = parent;
+                    ens = string.Empty;
+                    while (el != null)
+                    {
+                        RemObjects.InternetPack.XMPP.Elements.Attribute els = el.Attributes.Where(a => a.Prefix == "xmlns" && a.Name == nd.Prefix).FirstOrDefault();
+                        if (els != null)
+                        {
+                            ens = els.Value;
+                            break;
+                        }
+                        el = el.Parent;
+                    }
+                }
+                else
+                    ens = at.Value;
+            }
+            else
+            {
+                RemObjects.InternetPack.XMPP.Elements.Attribute at = nd.Attribute.FirstOrDefault(a => a.Prefix == null && a.Name == "xmlns");
+                if (at == null) 
+                    ens = string.Empty;
+                else
+                    ens = at.Value;
+            }
+            Element res = null;
+            switch (ens)
+            {
+                case Namespaces.ClientStreamNamespace:
+                case Namespaces.ServerStreamNamespace:
+                case "":
+                    if (ens == null && parent != null && parent.Type == ElementType.IQ && nd.Name == "error")
+                        res = new IQError();
+                    else
+                        switch (nd.Name)
+                        {
+                            case "iq":
+                                res = new IQ();
+                                break;
+                            case "presence":
+                                res = new Presence();
+                                break;
+                            case "message":
+                                res = new Message();
+                                break;
+                        }
+                    break;
+                case Namespaces.StreamNamespace:
+                    switch (nd.Name)
+                    {
+                        case "stream":
+
+                            RemObjects.InternetPack.XMPP.Elements.Attribute att = nd.Attribute.FirstOrDefault(a => a.Prefix == null && a.Name == "xmlns");
+                            if (att == null || att.Value == Namespaces.ClientStreamNamespace)
+                                res = new ClientStream();
+                            else
+                                res = new ServerStream();
+                            break;
+                        case "features":
+                            res = new StreamFeatures();
+                            break;
+                        case "error":
+                            res = new StreamError();
+                            break;
+                    }
+                    break;
+                case Namespaces.StartTLSNamespace:
+                    switch (nd.Name)
+                    {
+                        case "starttls":
+                            res = new StartTLS();
+                            break;
+                        case "failure":
+                            res = new StartTLSFailure();
+                            break;
+                        case "proceed":
+                            res = new StartTLSProceed();
+                            break;  
+                    }
+
+                    break;
+                case Namespaces.SaslNamespace:
+                    switch (nd.Name) {
+                        case "mechanisms":
+                            res = new Mechanisms();
+                            break;
+                        case "auth":
+                            res = new SaslAuth();
+                            break;
+                        case "challenge":
+                            res = new SaslChallenge();
+                            break;
+                        case "response":
+                            res = new SaslResponse();
+                            break;
+                        case "abort":
+                            res = new SaslAbort();
+                            break;
+                        case "success":
+                            res = new SaslSuccess();
+                            break;
+                        case "failure":
+                            res = new SaslFailure();
+                            break;
+                    }
+                    break;
+            }
+            if (res == null)
+            {
+                res = new UnknownElement();
+            }
+            else
+                res.Attributes.Clear(); // default ones shouldn't be here during the reading process
+            if (parent != null)
+            {
+                res.Parent = parent;
+                if (parent != fServerRoot)
+                    parent.Elements.Add(res);
+            }
+            res.Prefix = nd.Prefix;
+            res.Name = nd.Name;
+            foreach (var el in nd.Attribute)
+                res.Attributes.Add(el);
+            return res;
         }
 
         private void GotRootLevelElement(Element el)
         {
-            throw new NotImplementedException();
+            if (fServerRoot != null)
+            {
+                SendStreamError(new StreamError { Error = StreamErrorKind.InvalidXml });
+                Close();
+                return;
+            }
+            fServerRoot = el;
+            if (fServerRoot.NamespaceURI != Namespaces.StreamNamespace || fServerRoot.GetAttributeByName(null, "xmlns") != Namespaces.ClientStreamNamespace) {
+                SendStreamError(new StreamError { Error = StreamErrorKind.BadNamespace });
+                return;
+            }
         }
 
-        private void BeginTimeout(Action act)
+
+        private void TimerCallback(object o)
         {
-            // TODO: Implement
+            Action act = fTimeoutCallback;
+            
+            if (act != null) act();
+        }
+
+        private void BeginTimeout(Action act) { BeginTimeout(act, false); }
+        private void BeginTimeout(Action act, bool aRepeat)
+        {
+            lock (this)
+            {
+                fTimeoutCallback = act;
+                if (aRepeat)
+                {
+                    if (fTimer == null)
+                    {
+                        fTimer = new System.Threading.Timer(new System.Threading.TimerCallback(TimerCallback), null, (long)fTimeout.TotalMilliseconds / 2, (long)fTimeout.TotalMilliseconds / 2);
+                    }
+                    else
+                    {
+                        fTimer.Change((long)fTimeout.TotalMilliseconds / 2, (long)fTimeout.TotalMilliseconds / 2);
+                    }
+                }
+                else
+                {
+                    if (fTimer == null)
+                    {
+                        fTimer = new System.Threading.Timer(new System.Threading.TimerCallback(TimerCallback), null, (long)fTimeout.TotalMilliseconds, System.Threading.Timeout.Infinite);
+                    }
+                    else
+                    {
+                        fTimer.Change((long)fTimeout.TotalMilliseconds, System.Threading.Timeout.Infinite);
+                    }
+                }
+            }
+        }
+
+        private void EndTimeout()
+        {
+            fTimeoutCallback = null;
+            fTimer.Change(0, System.Threading.Timeout.Infinite);
         }
 
         public void Close()
@@ -497,7 +1143,8 @@ namespace RemObjects.InternetPack.XMPP
             {
                 try
                 {
-                    fConnection.Abort();
+                    Connection cn = fConnection;
+                    if (cn != null) fConnection.Abort();
                 }
                 catch { } // ignore any errors that might occur from the socket
                 fConnection = null;

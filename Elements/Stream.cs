@@ -11,6 +11,9 @@ namespace RemObjects.InternetPack.XMPP.Elements
         protected override void Init()
         {
             base.Init();
+            this.Prefix = "stream";
+            this.Name = "stream";
+            this.NamespaceURI = Namespaces.StreamNamespace;
             this.Attributes.Add(new Attribute
             {
                 Name = "xmlns",
@@ -23,12 +26,15 @@ namespace RemObjects.InternetPack.XMPP.Elements
     {
         protected override void Init()
         {
-            base.Init();
+            this.Prefix = "stream";
+            this.Name = "stream";
             this.Attributes.Add(new Attribute
             {
                 Name = "xmlns",
                 Value = Namespaces.ClientStreamNamespace
             });
+            base.Init();
+            
         }
     }
     public abstract class Stream : ToFromElement
@@ -71,6 +77,22 @@ namespace RemObjects.InternetPack.XMPP.Elements
         public override ElementType Type
         {
             get { return ElementType.StreamFeatures; }
+        }
+
+        public StartTLS StartTLS
+        {
+            get
+            {
+                return this.FindElement(Namespaces.StartTLSNamespace, "starttls") as StartTLS;
+            }
+        }
+
+        public Mechanisms AuthenticationMechanisms
+        {
+            get
+            {
+                return this.FindElement(Namespaces.SaslNamespace, "mechanisms") as Mechanisms;
+            }
         }
     }
 

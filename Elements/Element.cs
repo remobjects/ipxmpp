@@ -11,6 +11,13 @@ namespace RemObjects.InternetPack.XMPP.Elements
         public string Name { get ;set; }
         public string Prefix { get;set; }
         public string Value { get; set; }
+
+        public override string ToString()
+        {
+            if (Prefix == null)
+                return Name + "='" + Value + "'";
+            return Prefix +":"+Name + "='" + Value + "'";
+        }
     }
 
     public enum WriteMode { None = 0, Close = 1, Open = 2 } // open only writes the opening tag, no children
@@ -24,6 +31,7 @@ namespace RemObjects.InternetPack.XMPP.Elements
     public static class StringBuilderExtensions {
         public static void UriEscape(this StringBuilder value, string s)
         {
+            if (s == null) return;
             for (int i = 0; i < s.Length; i++)
             {
                 switch (s[i])
@@ -64,7 +72,7 @@ namespace RemObjects.InternetPack.XMPP.Elements
 
         public abstract ElementType Type { get; }
         private Element fParent;
-        public Element Parent { get { return fParent; }}
+        public Element Parent { get { return fParent; } internal set { fParent = value; } }
         
         public Element(): this(null, true)
         {
@@ -91,10 +99,10 @@ namespace RemObjects.InternetPack.XMPP.Elements
                     Element cur = this;
                     do
                     {
-                        string s = cur.GetAttributeByName(null, "xmlns");
-                        if (s != null) return null;
+                        string s = cur.GetAttributeByNameAndPrefix(null, "xmlns");
+                        if (s != null) return s;
                         cur = cur.Parent;
-                    } while (cur == null);
+                    } while (cur != null);
                     return null; 
                 }
                 else
@@ -108,7 +116,7 @@ namespace RemObjects.InternetPack.XMPP.Elements
                 {
                     Prefix = ResolveNamespace(value);
                     if (Prefix == null) 
-                        AddOrReplaceAttribute(null, "xmlns", NamespaceURI);
+                        AddOrReplaceAttribute(null, "xmlns", value);
                 }
             }
         }
@@ -119,7 +127,7 @@ namespace RemObjects.InternetPack.XMPP.Elements
             Element cur = this;
             do
             {
-                string n = cur.GetAttributeByName("xmlns", prefix);
+                string n = cur.GetAttributeByNameAndPrefix("xmlns", prefix);
                 if (n != null) return n;
                 cur = cur.Parent;
             } while (cur != null);
@@ -164,6 +172,16 @@ namespace RemObjects.InternetPack.XMPP.Elements
                         return null;
                 }
             }
+            for (int i = 0; i < Attributes.Count; i++)
+            {
+                if (Attributes[i].Prefix == pref && Attributes[i].Name == name)
+                    return Attributes[i].Value;
+            }
+            return null;
+        }
+
+        public string GetAttributeByNameAndPrefix(string pref, string name)
+        {
             for (int i = 0; i < Attributes.Count; i++)
             {
                 if (Attributes[i].Prefix == pref && Attributes[i].Name == name)
@@ -244,7 +262,7 @@ namespace RemObjects.InternetPack.XMPP.Elements
 
         public virtual void ToString(StringBuilder builder, WriteOptions wm)
         {
-            if (wm.Mode == WriteMode.Close) {
+            if (wm.Mode != WriteMode.Close) {
                 builder.Append('<');
                 if (Prefix != null) {
                     builder.Append(Prefix);
@@ -266,7 +284,18 @@ namespace RemObjects.InternetPack.XMPP.Elements
                     builder.Append('\'');
                 }
             }
-            if (Elements.Count > 0 || wm.Mode == WriteMode.Open)
+            if (wm.Mode == WriteMode.Close)
+            {
+                builder.Append("</");
+                if (Prefix != null)
+                {
+                    builder.Append(Prefix);
+                    builder.Append(':');
+                }
+                builder.Append(Name);
+            
+            } else 
+            if (!String.IsNullOrEmpty(Text) || Elements.Count > 0 || wm.Mode == WriteMode.Open)
             {
                 builder.Append('>');
                 WriteMode oldwm = wm.Mode;

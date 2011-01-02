@@ -12,18 +12,20 @@ namespace RemObjects.InternetPack.XMPP.Elements
 
         IQ, Message, Presence,
 
-        Mechanism,
+        IQError,
 
         StartTLS,
         StartTLSProceed,
         StartTLSFailure,
 
+        Mechanism,
         SASLAuth,
         SASLChallenge,
         SASLResponse,
         SASLAbort,
         SASLSuccess,
-        SASLFailure
+        SASLFailure,
+        IQBind
     }
 
     public static class Namespaces
@@ -34,7 +36,11 @@ namespace RemObjects.InternetPack.XMPP.Elements
         public const string ServerStreamNamespace = "jabber:server";
         public const string StartTLSNamespace = "urn:ietf:params:xml:ns:xmpp-tls";
         public const string SaslNamespace = "urn:ietf:params:xml:ns:xmpp-sasl";
+        public const string StanzasNamespace = "urn:ietf:params:xml:ns:xmpp-stanzas";
         public const string XMPPStreamNamespace = "urn:ietf:params:xml:ns:xmpp-streams";
+        public const string GTalkAuth = "http://www.google.com/talk/protocol/auth";
+        public const string IQBindNamespace = "urn:ietf:params:xml:ns:xmpp-bind";
+        public const string SessionNamespace = "urn:ietf:params:xml:ns:xmpp-session";
     }
 
 }

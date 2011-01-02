@@ -93,6 +93,24 @@ namespace RemObjects.InternetPack.XMPP.Elements
             Name = "failure";
         }
 
+        public string StringError
+        {
+            get
+            {
+                switch (FailureType)
+                {
+                    case SaslFailureType.Aborted: return "Aborted";
+                    case SaslFailureType.IncorrectEncoding: return "Incorrect encoding";
+                    case SaslFailureType.InvalidAutzid: return "Invalid authzid";
+                    case SaslFailureType.InvalidMechanism: return "Invalid mechanism";
+                    case SaslFailureType.MechanismTooWeak: return "Mechanism too weak";
+                    case SaslFailureType.NotAuthorized: return "Not authorized";
+                    case SaslFailureType.TemporaryAuthFailure: return "Temporary authentication error";
+                    default:
+                        return "Unkown sasl error: "+this;
+                }
+            }
+        }
         public SaslFailureType FailureType
         {
             get
