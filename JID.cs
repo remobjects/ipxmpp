@@ -91,6 +91,14 @@ namespace RemObjects.InternetPack.XMPP
             }
         }
 
+        public string NameAndDomain
+        {
+            get
+            {
+                return Name + "@" + Domain;
+            }
+        }
+
         public string Resource
         {
             get

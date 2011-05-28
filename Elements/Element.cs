@@ -207,6 +207,12 @@ namespace RemObjects.InternetPack.XMPP.Elements
                     }
                     Attributes.Add(new Attribute
                     {
+                        Name = pref,
+                        Prefix = "xmlns",
+                        Value = @namespace
+                    });
+                    Attributes.Add(new Attribute
+                    {
                         Name = name,
                         Prefix = pref,
                         Value = value
@@ -228,6 +234,25 @@ namespace RemObjects.InternetPack.XMPP.Elements
                 Prefix = pref,
                 Value = value
             });
+        }
+
+        public void RemoveAttribute(string @namespace, string name)
+        {
+            string pref = null;
+            if (@namespace != null)
+            {
+                pref = ResolveNamespace(@namespace);
+                if (pref == null) return;
+            }
+            for (int i = 0; i < Attributes.Count; i++)
+            {
+                if (Attributes[i].Prefix == pref && Attributes[i].Name == name)
+                {
+                    Attributes.RemoveAt(i);
+                    return;
+                }
+            }
+            
         }
 
         public IEnumerable<Element> FindElements(string @namespace, string name) 

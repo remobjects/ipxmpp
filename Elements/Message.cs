@@ -6,7 +6,7 @@ using System.Text;
 namespace RemObjects.InternetPack.XMPP.Elements
 {
 
-    public enum MessageType { message, groupchat }
+    public enum MessageType { message, groupchat, chat }
 
     public class Message : Stanza
     {
@@ -47,18 +47,21 @@ namespace RemObjects.InternetPack.XMPP.Elements
         {
             get
             {
-                string s = GetAttributeByName(null, "type");
+                string s = GetAttributeByName(Namespaces.ClientStreamNamespace, "type");
                 if (s == "groupchat")
                     return XMPP.Elements.MessageType.groupchat;
+                if (s == "chat")
+                    return XMPP.Elements.MessageType.chat;
                 return XMPP.Elements.MessageType.message;
             }
             set
             {
                 switch (value)
                 {
-                    case XMPP.Elements.MessageType.groupchat: AddOrReplaceAttribute(null, "type", "groupchat"); break;
+                    case XMPP.Elements.MessageType.groupchat: AddOrReplaceAttribute(Namespaces.ClientStreamNamespace, "type", "groupchat"); break;
+                    case XMPP.Elements.MessageType.chat: AddOrReplaceAttribute(Namespaces.ClientStreamNamespace, "type", "chat"); break;
                     default: 
-                        AddOrReplaceAttribute(null, "type", "message"); break;
+                        AddOrReplaceAttribute(Namespaces.ClientStreamNamespace, "type", "message"); break;
                 }
             }
         }
