@@ -282,7 +282,7 @@ namespace RemObjects.InternetPack.XMPP
             Authenticate = true;
             ResolveDomain = true;
             CreateSession = true;
-            fTimeout = new TimeSpan(0, 0, 15);
+            fTimeout = new TimeSpan(0, 0, 30);
         }
 
         private int fCounter;
@@ -313,7 +313,7 @@ namespace RemObjects.InternetPack.XMPP
         private List<Element> fServerElementStack = new List<Element>();
         private AsyncXmlParser parser;
         private Mechanisms fServerMechanisms;
-        private System.Threading.Timer fTimer;
+        private Timer fTimer;
         private volatile Action fTimeoutCallback;
 
         
@@ -505,7 +505,7 @@ namespace RemObjects.InternetPack.XMPP
         {
             BeginTimeout(() =>
             {
-                OnError(new TimeoutException());
+                OnError(new TimeoutException("System Timeout"));
                 Close();
             });
         }
@@ -783,7 +783,7 @@ namespace RemObjects.InternetPack.XMPP
             {
                 if (a == null)
                 {
-                    OnError(new TimeoutException());
+                    OnError(new TimeoutException("ResourceBinding"));
                     Close();
                     return;
                 }
@@ -819,7 +819,7 @@ namespace RemObjects.InternetPack.XMPP
             SendIQ(iq, a => {
                 if (a == null)
                 {
-                    OnError(new TimeoutException());
+                    OnError(new TimeoutException("CreateSession"));
                     Close();
                     return;
                 }
@@ -1093,46 +1093,32 @@ namespace RemObjects.InternetPack.XMPP
 
         private void TimerCallback(object o)
         {
+		
             Action act = fTimeoutCallback;
-            
+
             if (act != null) act();
         }
 
         private void BeginTimeout(Action act) { BeginTimeout(act, false); }
-        private void BeginTimeout(Action act, bool aRepeat)
+
+		private void BeginTimeout(Action act, bool aRepeat)
         {
-            lock (this)
-            {
-                fTimeoutCallback = act;
-                if (aRepeat)
-                {
-                    if (fTimer == null)
-                    {
-                        fTimer = new System.Threading.Timer(new System.Threading.TimerCallback(TimerCallback), null, (long)fTimeout.TotalMilliseconds / 2, (long)fTimeout.TotalMilliseconds / 2);
-                    }
-                    else
-                    {
-                        fTimer.Change((long)fTimeout.TotalMilliseconds / 2, (long)fTimeout.TotalMilliseconds / 2);
-                    }
-                }
-                else
-                {
-                    if (fTimer == null)
-                    {
-                        fTimer = new System.Threading.Timer(new System.Threading.TimerCallback(TimerCallback), null, (long)fTimeout.TotalMilliseconds, System.Threading.Timeout.Infinite);
-                    }
-                    else
-                    {
-                        fTimer.Change((long)fTimeout.TotalMilliseconds, System.Threading.Timeout.Infinite);
-                    }
-                }
-            }
+			lock (this)
+			{
+				var lTTimeout = TimeSpan.FromSeconds(fTimeout.TotalSeconds / 2);
+				if (fTimer == null)
+				{
+					fTimer = new Timer(TimerCallback);
+				}
+				fTimer.Set(lTTimeout, aRepeat);
+				fTimeoutCallback = act;
+			}
         }
 
         private void EndTimeout()
         {
             fTimeoutCallback = null;
-            fTimer.Change(0, System.Threading.Timeout.Infinite);
+			fTimer.Set(TimeSpan.FromSeconds(-1), false);
         }
 
         public void Close()

@@ -47,7 +47,7 @@ namespace RemObjects.InternetPack.XMPP.Elements
         {
             get
             {
-                string s = GetAttributeByName(Namespaces.ClientStreamNamespace, "type");
+                string s = GetAttributeByName(null, "type");
                 if (s == "groupchat")
                     return XMPP.Elements.MessageType.groupchat;
                 if (s == "chat")
@@ -58,10 +58,10 @@ namespace RemObjects.InternetPack.XMPP.Elements
             {
                 switch (value)
                 {
-                    case XMPP.Elements.MessageType.groupchat: AddOrReplaceAttribute(Namespaces.ClientStreamNamespace, "type", "groupchat"); break;
-                    case XMPP.Elements.MessageType.chat: AddOrReplaceAttribute(Namespaces.ClientStreamNamespace, "type", "chat"); break;
+					case XMPP.Elements.MessageType.groupchat: AddOrReplaceAttribute(null, "type", "groupchat"); break;
+					case XMPP.Elements.MessageType.chat: AddOrReplaceAttribute(null, "type", "chat"); break;
                     default: 
-                        AddOrReplaceAttribute(Namespaces.ClientStreamNamespace, "type", "message"); break;
+                        AddOrReplaceAttribute(null, "type", "message"); break;
                 }
             }
         }

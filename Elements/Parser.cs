@@ -117,29 +117,29 @@ namespace RemObjects.InternetPack.XMPP.Elements
         {
             if (clearData)
                 currentData.SetLength(0);
-            do
-            {
-                while (readBufferStart < readBufferEnd)
-                {
-                    if (read(readBuffer[readBufferStart]))
-                    {
-                        return true;
-                    }
-                    else
-                    {
-                        currentData.WriteByte(readBuffer[readBufferStart]);
-                        readBufferStart++;
-                    }
-                }
-                if (Origin.Available > 0)
-                {
-                    readBufferStart = 0;
-                    readBufferEnd = Origin.ReceiveWhatsAvailable(readBuffer, 0, readBuffer.Length);
-                }
-                else break;
-            } while (true);
-            try
-            {
+			try
+			{
+				do
+				{
+					while (readBufferStart < readBufferEnd)
+					{
+						if (read(readBuffer[readBufferStart]))
+						{
+							return true;
+						}
+						else
+						{
+							currentData.WriteByte(readBuffer[readBufferStart]);
+							readBufferStart++;
+						}
+					}
+					if (Origin.Available > 0)
+					{
+						readBufferStart = 0;
+						readBufferEnd = Origin.ReceiveWhatsAvailable(readBuffer, 0, readBuffer.Length);
+					}
+					else break;
+				} while (true);
                 readBufferStart = 0;
                 Origin.BeginRead(readBuffer, 0, readBuffer.Length, new AsyncCallback(GotReadUntil), read);
             }

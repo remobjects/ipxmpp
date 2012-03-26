@@ -31,7 +31,7 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="RemObjects.InternetPack, Version=2.0.51.890, Culture=neutral, PublicKeyToken=3df3cad1b7aa5098, processorArchitecture=MSIL" />
+    <Reference Include="RemObjects.InternetPack, Version=2.0.56.998, Culture=neutral, PublicKeyToken=3df3cad1b7aa5098, processorArchitecture=MSIL" />
     <Reference Include="System" />
     <Reference Include="System.Core" />
   </ItemGroup>
@@ -51,6 +51,7 @@
     <Compile Include="JID.cs" />
     <Compile Include="Elements\StartTLS.cs" />
     <Compile Include="Elements\Element.cs" />
+    <Compile Include="Timeout.cs" />
     <Compile Include="XMPP.cs">
       <SubType>Component</SubType>
     </Compile>
