@@ -318,6 +318,7 @@ namespace RemObjects.InternetPack.XMPP.Elements
                     builder.Append(':');
                 }
                 builder.Append(Name);
+				builder.Append(">");
             
             } else 
             if (!String.IsNullOrEmpty(Text) || Elements.Count > 0 || wm.Mode == WriteMode.Open)
@@ -331,7 +332,7 @@ namespace RemObjects.InternetPack.XMPP.Elements
                 }
                 wm.Mode = oldwm;
                 if (wm.Mode == WriteMode.None && Text != null)
-                    builder.Append(Text);
+                    builder.UriEscape(Text);
                 if (wm.Mode != WriteMode.Open)
                 {
                     builder.Append("</");

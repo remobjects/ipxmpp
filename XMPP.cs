@@ -338,6 +338,7 @@ namespace RemObjects.InternetPack.XMPP
             sb.Length = 0;
             element.ToString(sb, new WriteOptions { Mode = mode, StreamPrefix = "stream" });
             byte[] data = Encoding.UTF8.GetBytes(sb.ToString());
+			//Console.WriteLine("Sending: " + sb);
             try
             {
                 Connection cn = fConnection;
@@ -843,11 +844,13 @@ namespace RemObjects.InternetPack.XMPP
 
         public void SendPresence(Presence presence)
         {
+			if (fState != XMPP.State.Active) throw new InvalidOperationException();
             BeginSend(presence, WriteMode.None, null);
         }
 
         public void SendMessage(Message msg)
         {
+			if (fState != XMPP.State.Active) throw new InvalidOperationException();
             BeginSend(msg, WriteMode.None, null);
         }
 
